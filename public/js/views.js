@@ -1018,6 +1018,126 @@ function confrontoModal() {
   );
 }
 
+/* ============================ ASSISTENTE WHATSAPP ============================ */
+
+const ESEMPI = [
+  'Avete display Samsung A16?',
+  'A526',
+  'display A526 nero',
+  'Hello, do you have a screen for A526?',
+  'Bonjour, avez-vous une batterie pour iPhone 13 ?',
+  '¿Tienen pantalla para A526?',
+];
+
+export async function assistente(params = {}) {
+  const telefono = params.telefono ?? '+390000000000';
+  const [stato, elenco] = await Promise.all([get('/whatsapp/stato'), get('/whatsapp/conversazioni')]);
+
+  view(html`
+    <div class="page-head">
+      <div><h1>💬 Assistente WhatsApp</h1><p>La stessa logica che risponde ai clienti su WhatsApp, provabile qui.</p></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="align-items:center">
+        <div style="flex:1 1 auto">
+          <strong>Stato collegamento</strong>
+          <div class="small muted">
+            ${raw(stato.attivo
+              ? html`<span class="tag ok">WhatsApp collegato</span> I messaggi dei clienti ricevono risposta automatica.`
+              : html`<span class="tag warn">WhatsApp non collegato</span> Il simulatore funziona lo stesso; per rispondere ai clienti veri servono le credenziali WhatsApp Business API.`)}
+          </div>
+        </div>
+      </div>
+      <div class="row small muted" style="margin-top:10px">
+        <span class="tag ${stato.invio_configurato ? 'ok' : ''}">invio messaggi: ${stato.invio_configurato ? 'sì' : 'no'}</span>
+        <span class="tag ${stato.webhook_configurato ? 'ok' : ''}">webhook: ${stato.webhook_configurato ? 'sì' : 'no'}</span>
+        <span class="tag ${stato.firma_verificata ? 'ok' : ''}">firma verificata: ${stato.firma_verificata ? 'sì' : 'no'}</span>
+        <span class="tag">avvisi scorte: ${stato.avvisi_scorte}</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <div style="flex:0 1 240px"><label>Numero del cliente</label><input id="aTel" value="${telefono}"></div>
+        <div class="spacer"></div>
+        <button id="aSvuota" style="flex:0 0 auto">🗑 Cancella conversazione</button>
+      </div>
+      <div class="chat" id="chat"><div class="chat-vuota">Scrivi come farebbe un cliente su WhatsApp.</div></div>
+      <form id="aForm" class="row" style="margin-top:10px">
+        <input id="aTesto" placeholder="Messaggio del cliente…" autocomplete="off">
+        <button class="primary" style="flex:0 0 auto">Invia</button>
+      </form>
+      <div class="esempi">${ESEMPI.map((e) => raw(html`<button data-esempio="${e}">${e}</button>`))}</div>
+    </div>
+
+    <h2>Conversazioni</h2>
+    ${elenco.totale === 0
+      ? raw(html`<div class="card empty">Nessuna conversazione.</div>`)
+      : raw(html`<div class="card" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>Cliente</th><th>Lingua</th><th>Stato</th><th class="num">Messaggi</th><th class="num">Ordini</th><th>Ultimo contatto</th><th></th></tr></thead>
+          <tbody>${elenco.conversazioni.map((c) => raw(html`<tr>
+            <td><strong>${c.phone}</strong>${c.name ? raw(html`<div class="muted small">${c.name}</div>`) : ''}</td>
+            <td><span class="tag">${c.lingua}</span></td>
+            <td class="small">${c.stato}</td>
+            <td class="num">${c.messaggi}</td>
+            <td class="num">${c.ordini}</td>
+            <td class="small nowrap">${dateTime(c.updated_at)}</td>
+            <td class="nowrap">
+              <button data-apri="${c.phone}">Apri</button>
+              <button class="ghost danger" data-dimentica="${c.phone}" title="Cancella i dati di questo cliente">🗑</button>
+            </td>
+          </tr>`))}</tbody></table></div></div>`)}
+  `);
+
+  const chat = $('#chat');
+  const mostra = (messaggi) => {
+    chat.innerHTML = messaggi.length
+      ? messaggi
+          .map((m) => html`<div class="bolla ${m.direzione === 'entrata' ? 'cliente' : 'bot'}">${m.testo}</div>`)
+          .join('')
+      : html`<div class="chat-vuota">Scrivi come farebbe un cliente su WhatsApp.</div>`;
+    chat.scrollTop = chat.scrollHeight;
+  };
+
+  const caricaConversazione = async () => {
+    const dati = await get(`/whatsapp/conversazioni/${encodeURIComponent($('#aTel').value)}`);
+    mostra(dati.messaggi);
+  };
+
+  const invia = async (testo) => {
+    if (!testo.trim()) return;
+    try {
+      await post('/whatsapp/simula', { telefono: $('#aTel').value, testo });
+      $('#aTesto').value = '';
+      await caricaConversazione();
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  };
+
+  $('#aForm').onsubmit = (event) => {
+    event.preventDefault();
+    invia($('#aTesto').value);
+  };
+  $$('[data-esempio]').forEach((b) => (b.onclick = () => invia(b.dataset.esempio)));
+  $('#aTel').onchange = caricaConversazione;
+  $('#aSvuota').onclick = async () => {
+    await del(`/whatsapp/conversazioni/${encodeURIComponent($('#aTel').value)}`);
+    toast('Conversazione cancellata', 'ok');
+    assistente({ telefono: $('#aTel').value });
+  };
+  $$('[data-apri]').forEach((b) => (b.onclick = () => assistente({ telefono: b.dataset.apri })));
+  $$('[data-dimentica]').forEach((b) => (b.onclick = async () => {
+    if (!(await confirmDialog(`Cancellare tutti i dati di ${b.dataset.dimentica}?`, { danger: true, ok: 'Cancella' }))) return;
+    await del(`/whatsapp/conversazioni/${encodeURIComponent(b.dataset.dimentica)}`);
+    assistente(params);
+  }));
+
+  await caricaConversazione();
+  $('#aTesto').focus();
+}
+
 /* ============================ CATALOGO MODELLI ============================ */
 
 export async function catalogoModelli(params = {}) {

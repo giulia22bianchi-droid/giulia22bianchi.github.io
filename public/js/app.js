@@ -10,6 +10,7 @@ const ROUTES = {
   avvisi: views.avvisi,
   carico: views.carico,
   anteprima: views.anteprima,
+  assistente: views.assistente,
   vendite: views.vendite,
   riepilogo: views.riepilogo,
   statistiche: views.statistiche,

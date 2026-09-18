@@ -192,6 +192,28 @@ CREATE TABLE IF NOT EXISTS missing_products (
   status TEXT NOT NULL DEFAULT 'da_valutare'
 );
 
+-- Stato della conversazione WhatsApp di ogni cliente.
+-- Contiene dati personali: va cancellato su richiesta e ripulito periodicamente.
+CREATE TABLE IF NOT EXISTS conversations (
+  phone TEXT PRIMARY KEY,
+  name TEXT,
+  lingua TEXT NOT NULL DEFAULT 'it',
+  stato TEXT NOT NULL DEFAULT 'iniziale',
+  contesto TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Messaggi scambiati: serve anche a non rielaborare due volte lo stesso messaggio
+CREATE TABLE IF NOT EXISTS whatsapp_messages (
+  id TEXT PRIMARY KEY,
+  phone TEXT NOT NULL,
+  direzione TEXT NOT NULL,
+  testo TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_wa_messages_phone ON whatsapp_messages(phone, created_at);
+
 -- Richieste che il sistema non ha saputo risolvere: nessuna invenzione, si chiede conferma
 CREATE TABLE IF NOT EXISTS unresolved_queries (
   id INTEGER PRIMARY KEY,

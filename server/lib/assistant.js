@@ -2,7 +2,7 @@ import { db } from '../db.js';
 import { ITEM_SELECT } from './inventory.js';
 import { resolveQuery, logUnresolved } from './resolver.js';
 
-// Motore di risposta condiviso da banco e (in futuro) assistente WhatsApp.
+// Motore di risposta condiviso da banco e assistente WhatsApp.
 // Regola fissa: quando manca un'informazione si chiede, non si indovina.
 
 function itemsFor({ modelId, categoryId = null, qualityId = null, color = null }) {
@@ -17,7 +17,7 @@ function itemsFor({ modelId, categoryId = null, qualityId = null, color = null }
     params.push(qualityId);
   }
   if (color) {
-    where.push('i.color = ?');
+    where.push('lower(i.color) = lower(?)');
     params.push(color);
   }
   return db
@@ -36,14 +36,103 @@ function uniqueBy(items, key) {
   return [...seen.values()];
 }
 
+export function categorieDisponibili(modelId) {
+  return db
+    .prepare(
+      `SELECT c.id, c.name, c.slug, c.icon, COUNT(*) AS varianti, SUM(i.quantity) AS pezzi
+       FROM items i JOIN categories c ON c.id = i.category_id
+       WHERE i.model_id = ? AND i.active = 1
+       GROUP BY c.id ORDER BY c.sort_order`,
+    )
+    .all(modelId);
+}
+
+/**
+ * Dato un modello certo e le scelte fatte finora, decide il passo successivo:
+ * servire il prezzo oppure chiedere il dato mancante.
+ */
+export function valuta({ model, category = null, quality = null, color = null }) {
+  if (!category) {
+    return { status: 'ricambio_mancante', model, categorie: categorieDisponibili(model.id) };
+  }
+
+  const tutti = itemsFor({ modelId: model.id, categoryId: category.id });
+  if (tutti.length === 0) {
+    return { status: 'non_a_catalogo', model, category };
+  }
+
+  let filtrati = tutti;
+  if (quality) filtrati = filtrati.filter((i) => i.quality_id === quality.id);
+  if (color) filtrati = filtrati.filter((i) => i.color.toLowerCase() === String(color).toLowerCase());
+
+  if (filtrati.length === 0) {
+    return { status: 'variante_non_disponibile', model, category, quality, color, alternative: tutti };
+  }
+
+  // Più qualità possibili (Originale, OLED, Incell...): vanno proposte, non scelte
+  const qualita = uniqueBy(filtrati, 'quality_name');
+  if (!quality && qualita.length > 1) {
+    return {
+      status: 'qualita_da_scegliere',
+      model,
+      category,
+      qualities: qualita.map((q) => ({
+        name: q.value,
+        quality_id: q.items[0].quality_id,
+        slug: q.items[0].quality_slug,
+        colori: [...new Set(q.items.map((i) => i.color).filter(Boolean))],
+        disponibili: q.items.reduce((s, i) => s + i.quantity, 0),
+        prezzo: q.items[0].price,
+      })),
+      items: filtrati,
+    };
+  }
+
+  const colori = uniqueBy(filtrati, 'color');
+  if (!color && colori.length > 1) {
+    return {
+      status: 'colore_da_scegliere',
+      model,
+      category,
+      quality,
+      colors: colori.map((c) => ({
+        name: c.value,
+        item_id: c.items[0].id,
+        disponibili: c.items.reduce((s, i) => s + i.quantity, 0),
+        prezzo: c.items[0].price,
+      })),
+      items: filtrati,
+    };
+  }
+
+  const item = filtrati[0];
+  return {
+    status: item.quantity > 0 ? 'disponibile' : 'esaurito',
+    model,
+    category,
+    quality,
+    color,
+    item,
+    // Il prezzo arriva sempre dal magazzino: se lo modifichi a mano, da qui esce quello nuovo
+    price: item.price,
+    quantity: item.quantity,
+    items: filtrati,
+  };
+}
+
+export function descrizioneArticolo(item) {
+  return [item.brand_name, item.model_name, '–', item.category_name, item.quality_name, item.color]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/** Interpreta una richiesta libera e produce la risposta per l'interfaccia web. */
 export function assist(query, { channel = 'web', logMisses = false } = {}) {
   const resolution = resolveQuery(query);
   const base = { query, resolution };
 
   if (resolution.status === 'not_found') {
-    if (logMisses) {
-      base.unresolved_id = logUnresolved({ query, reason: 'not_found', channel });
-    }
+    if (logMisses) base.unresolved_id = logUnresolved({ query, reason: 'not_found', channel });
     return {
       ...base,
       status: 'modello_non_riconosciuto',
@@ -69,122 +158,47 @@ export function assist(query, { channel = 'web', logMisses = false } = {}) {
   }
 
   const model = resolution.models[0];
-
-  // Il modello è chiaro ma non il ricambio: "A526" da solo non significa display.
-  if (!resolution.category) {
-    const available = db
-      .prepare(
-        `SELECT c.id, c.name, c.slug, c.icon, COUNT(*) AS varianti, SUM(i.quantity) AS pezzi
-         FROM items i JOIN categories c ON c.id = i.category_id
-         WHERE i.model_id = ? AND i.active = 1
-         GROUP BY c.id ORDER BY c.sort_order`,
-      )
-      .all(model.id);
-    return {
-      ...base,
-      status: 'ricambio_mancante',
-      model,
-      question: available.length
-        ? `${model.brand} ${model.name}: quale ricambio ti serve? (${available.map((c) => c.name).join(', ')})`
-        : `${model.brand} ${model.name} è riconosciuto, ma non ho ancora articoli a catalogo per questo modello. Quale ricambio ti serve?`,
-      categories: available,
-      items: [],
-    };
-  }
-
-  const all = itemsFor({ modelId: model.id, categoryId: resolution.category.id });
-  if (all.length === 0) {
-    return {
-      ...base,
-      status: 'non_a_catalogo',
-      model,
-      category: resolution.category,
-      question: `Non ho ${resolution.category.name} per ${model.brand} ${model.name} a catalogo.`,
-      items: [],
-    };
-  }
-
-  let filtered = all;
-  if (resolution.quality) filtered = filtered.filter((i) => i.quality_id === resolution.quality.id);
-  if (resolution.color) {
-    filtered = filtered.filter((i) => i.color.toLowerCase() === String(resolution.color).toLowerCase());
-  }
-
-  if (filtered.length === 0) {
-    return {
-      ...base,
-      status: 'variante_non_disponibile',
-      model,
-      category: resolution.category,
-      question: `Per ${model.brand} ${model.name} ${resolution.category.name} non ho questa combinazione${
-        resolution.quality ? ` (${resolution.quality.name})` : ''
-      }${resolution.color ? ` in ${resolution.color}` : ''}. Disponibili: ${all
-        .map((i) => [i.quality_name, i.color].filter(Boolean).join(' '))
-        .join(', ')}.`,
-      alternatives: all,
-      items: [],
-    };
-  }
-
-  // Più qualità possibili: Originale, OLED, Incell... vanno proposte, non scelte
-  const qualities = uniqueBy(filtered, 'quality_name');
-  if (!resolution.quality && qualities.length > 1) {
-    return {
-      ...base,
-      status: 'qualita_da_scegliere',
-      model,
-      category: resolution.category,
-      question: `${model.brand} ${model.name} - ${resolution.category.name}: quale versione? ${qualities
-        .map((q) => q.value)
-        .join(' – ')}`,
-      qualities: qualities.map((q) => ({
-        name: q.value,
-        quality_id: q.items[0].quality_id,
-        colori: [...new Set(q.items.map((i) => i.color).filter(Boolean))],
-        disponibili: q.items.reduce((s, i) => s + i.quantity, 0),
-      })),
-      items: filtered,
-    };
-  }
-
-  const colors = uniqueBy(filtered, 'color');
-  if (!resolution.color && colors.length > 1) {
-    return {
-      ...base,
-      status: 'colore_da_scegliere',
-      model,
-      category: resolution.category,
-      quality: resolution.quality,
-      question: `Disponibile in ${colors.map((c) => c.value).join(' – ')}. Quale colore?`,
-      colors: colors.map((c) => ({
-        name: c.value,
-        item_id: c.items[0].id,
-        disponibili: c.items.reduce((s, i) => s + i.quantity, 0),
-        prezzo: c.items[0].price,
-      })),
-      items: filtered,
-    };
-  }
-
-  const item = filtered[0];
-  const inStock = item.quantity > 0;
-  return {
-    ...base,
-    status: inStock ? 'disponibile' : 'esaurito',
+  const esito = valuta({
     model,
     category: resolution.category,
-    item,
-    // Il prezzo arriva sempre dal magazzino: se lo modifichi a mano, da qui esce quello nuovo
-    price: item.price,
-    quantity: item.quantity,
-    question: null,
-    answer: inStock
-      ? `${item.brand_name} ${item.model_name} – ${item.category_name}${
-          item.quality_name ? ` ${item.quality_name}` : ''
-        }${item.color ? ` ${item.color}` : ''}: ${item.price.toFixed(2)} € (disponibili ${item.quantity})`
-      : `${item.brand_name} ${item.model_name} – ${item.category_name}${
-          item.quality_name ? ` ${item.quality_name}` : ''
-        }${item.color ? ` ${item.color}` : ''}: al momento esaurito.`,
-    items: filtered,
+    quality: resolution.quality,
+    color: resolution.color,
+  });
+
+  const domande = {
+    ricambio_mancante: () =>
+      esito.categorie.length
+        ? `${model.brand} ${model.name}: quale ricambio ti serve? (${esito.categorie.map((c) => c.name).join(', ')})`
+        : `${model.brand} ${model.name} è riconosciuto, ma non ho ancora articoli a catalogo per questo modello. Quale ricambio ti serve?`,
+    non_a_catalogo: () => `Non ho ${esito.category.name} per ${model.brand} ${model.name} a catalogo.`,
+    variante_non_disponibile: () =>
+      `Per ${model.brand} ${model.name} ${esito.category.name} non ho questa combinazione${
+        esito.quality ? ` (${esito.quality.name})` : ''
+      }${esito.color ? ` in ${esito.color}` : ''}. Disponibili: ${esito.alternative
+        .map((i) => [i.quality_name, i.color].filter(Boolean).join(' '))
+        .join(', ')}.`,
+    qualita_da_scegliere: () =>
+      `${model.brand} ${model.name} - ${esito.category.name}: quale versione? ${esito.qualities
+        .map((q) => q.name)
+        .join(' – ')}`,
+    colore_da_scegliere: () => `Disponibile in ${esito.colors.map((c) => c.name).join(' – ')}. Quale colore?`,
   };
+
+  const risposta = {
+    ...base,
+    ...esito,
+    categories: esito.categorie,
+    alternatives: esito.alternative,
+    question: domande[esito.status]?.() ?? null,
+  };
+
+  if (esito.status === 'disponibile' || esito.status === 'esaurito') {
+    risposta.answer =
+      esito.status === 'disponibile'
+        ? `${descrizioneArticolo(esito.item)}: ${esito.item.price.toFixed(2)} € (disponibili ${esito.item.quantity})`
+        : `${descrizioneArticolo(esito.item)}: al momento esaurito.`;
+  }
+
+  risposta.items ??= [];
+  return risposta;
 }

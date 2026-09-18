@@ -13,6 +13,8 @@ import { statsRouter } from './routes/stats.js';
 import { searchRouter } from './routes/search.js';
 import { missingRouter } from './routes/missing.js';
 import { intakeRouter } from './routes/intake.js';
+import { whatsappRouter } from './routes/whatsapp.js';
+import { collegaAvvisiScorte } from './lib/whatsapp.js';
 import { seed } from './seed/run.js';
 
 // Al primo avvio (o su un hosting con database vuoto) il catalogo di base va caricato
@@ -23,7 +25,8 @@ if (db.prepare(`SELECT COUNT(*) AS n FROM categories`).get().n === 0) {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 
-app.use(express.json({ limit: '2mb' }));
+// Il corpo grezzo serve a verificare la firma dei webhook WhatsApp
+app.use(express.json({ limit: '2mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.static(resolve(__dirname, '../public')));
 
 // Protezione opzionale: se ACCESS_CODE è impostato, le API rispondono solo a chi
@@ -32,6 +35,8 @@ const ACCESS_CODE = process.env.ACCESS_CODE;
 if (ACCESS_CODE) {
   const atteso = Buffer.from(ACCESS_CODE);
   app.use('/api', (req, res, next) => {
+    // Il webhook di WhatsApp è autenticato da Meta con token e firma, non dal codice
+    if (req.path.startsWith('/whatsapp/webhook')) return next();
     const ricevuto = Buffer.from(String(req.get('x-access-code') ?? req.query.code ?? ''));
     if (ricevuto.length === atteso.length && timingSafeEqual(ricevuto, atteso)) return next();
     res.status(401).json({ error: 'Codice di accesso non valido' });
@@ -71,6 +76,9 @@ app.use('/api/stats', statsRouter);
 app.use('/api/search', searchRouter);
 app.use('/api/missing', missingRouter);
 app.use('/api/intake', intakeRouter);
+app.use('/api/whatsapp', whatsappRouter);
+
+collegaAvvisiScorte();
 
 app.use((req, res) => {
   res.status(404).json({ error: 'Endpoint non trovato', path: req.path });
