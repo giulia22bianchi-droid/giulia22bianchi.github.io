@@ -1,0 +1,21 @@
+{
+  "name": "magazzino-ricambi",
+  "version": "1.0.0",
+  "description": "Gestionale magazzino ricambi telefonia: catalogo modelli, varianti, vendite, carichi da PDF e statistiche",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "seed": "node server/seed/run.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "express": "^4.21.2",
+    "multer": "^2.4.0",
+    "pdfjs-dist": "^4.10.38"
+  }
+}
