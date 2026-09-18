@@ -32,18 +32,18 @@ app.use(express.static(resolve(__dirname, '../public')));
 // Protezione opzionale: se ACCESS_CODE è impostato, le API rispondono solo a chi
 // conosce il codice. Senza variabile il server resta aperto (uso in rete locale).
 const ACCESS_CODE = process.env.ACCESS_CODE;
-if (ACCESS_CODE) {
+
+function codiceValido(req) {
+  if (!ACCESS_CODE) return true;
   const atteso = Buffer.from(ACCESS_CODE);
-  app.use('/api', (req, res, next) => {
-    // Il webhook di WhatsApp è autenticato da Meta con token e firma, non dal codice
-    if (req.path.startsWith('/whatsapp/webhook')) return next();
-    const ricevuto = Buffer.from(String(req.get('x-access-code') ?? req.query.code ?? ''));
-    if (ricevuto.length === atteso.length && timingSafeEqual(ricevuto, atteso)) return next();
-    res.status(401).json({ error: 'Codice di accesso non valido' });
-  });
+  const ricevuto = Buffer.from(String(req.get('x-access-code') ?? req.query.code ?? ''));
+  return ricevuto.length === atteso.length && timingSafeEqual(ricevuto, atteso);
 }
 
+// Controllo di stato per l'hosting: sempre raggiungibile, ma i numeri del
+// magazzino li vede solo chi ha il codice.
 app.get('/api/health', (req, res) => {
+  if (!codiceValido(req)) return res.json({ ok: true });
   res.json({
     ok: true,
     articoli: db.prepare(`SELECT COUNT(*) AS n FROM items WHERE active = 1`).get().n,
@@ -52,6 +52,15 @@ app.get('/api/health', (req, res) => {
     dispositivi_connessi: clientCount(),
   });
 });
+
+if (ACCESS_CODE) {
+  app.use('/api', (req, res, next) => {
+    // Il webhook di WhatsApp è autenticato da Meta con token e firma, non dal codice
+    if (req.path.startsWith('/whatsapp/webhook')) return next();
+    if (codiceValido(req)) return next();
+    res.status(401).json({ error: 'Codice di accesso non valido' });
+  });
+}
 
 // Sincronizzazione in tempo reale tra PC, telefono e tablet
 app.get('/api/events', (req, res) => {

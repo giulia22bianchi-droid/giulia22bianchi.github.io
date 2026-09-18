@@ -43,7 +43,16 @@ npm run seed         # ricarica il catalogo di base
 
 Serve un hosting che esegua Node.js (Render, Railway, Fly.io, un VPS…): GitHub Pages
 ospita solo file statici e non può eseguire il server né il database. Il disco che contiene
-`data/` deve essere persistente, altrimenti il magazzino si azzera a ogni riavvio.
+il file del database deve essere persistente, altrimenti il magazzino si azzera a ogni riavvio.
+
+Il file `render.yaml` è già pronto per [render.com](https://render.com):
+
+1. Crea un account e scegli **New → Blueprint**.
+2. Collega questo repository: Render legge `render.yaml` e configura tutto da solo.
+3. Serve un piano con disco (il piano gratuito non conserva i dati e spegne il servizio).
+4. A fine installazione, nella scheda **Environment**, copia il valore di `ACCESS_CODE`:
+   è la password che ti verrà chiesta la prima volta su ogni dispositivo.
+5. Apri l'indirizzo che Render ti assegna da PC, telefono e tablet: è lo stesso magazzino.
 
 ## Come si usa
 

@@ -1,0 +1,33 @@
+# Configurazione per pubblicare il gestionale su render.com.
+# Il disco serve a non perdere il magazzino a ogni riavvio: richiede un piano a pagamento.
+services:
+  - type: web
+    name: magazzino-ricambi
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    disk:
+      name: dati
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DB_PATH
+        value: /var/data/magazzino.db
+      # Codice di accesso generato da Render: lo leggi nella scheda Environment
+      - key: ACCESS_CODE
+        generateValue: true
+      # Da compilare solo quando colleghi WhatsApp Business API
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_ALERT_PHONE
+        sync: false
