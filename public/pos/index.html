@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NovaCassa</title>
+<link rel="stylesheet" href="css/pos.css" />
+<link rel="icon" href="data:," />
+</head>
+<body>
+<div id="app">
+  <nav class="sidebar">
+    <div class="brand">NovaCassa<small>punto vendita</small></div>
+    <button class="nav-btn active" data-view="cassa">🧾 Cassa</button>
+    <button class="nav-btn" data-view="prodotti">📦 Prodotti</button>
+    <button class="nav-btn" data-view="magazzino">🏷️ Magazzino</button>
+    <button class="nav-btn" data-view="clienti">👤 Clienti</button>
+    <button class="nav-btn" data-view="vendite">🧮 Vendite</button>
+    <button class="nav-btn" data-view="statistiche">📊 Statistiche</button>
+    <button class="nav-btn" data-view="impostazioni">⚙️ Impostazioni</button>
+  </nav>
+
+  <main>
+    <!-- CASSA -->
+    <section class="view active" data-view="cassa">
+      <h1 class="view-title">Cassa</h1>
+      <div class="pos-layout">
+        <div>
+          <div class="toolbar">
+            <input id="pos-search" type="text" placeholder="Cerca prodotto o scansiona codice a barre…" style="flex:1; min-width:220px;" />
+            <div id="pos-categories" class="toolbar"></div>
+          </div>
+          <div id="pos-grid" class="product-grid"></div>
+        </div>
+
+        <aside class="cart-panel">
+          <div class="field">
+            <label for="pos-customer">Cliente (opzionale)</label>
+            <select id="pos-customer"><option value="">— nessun cliente —</option></select>
+          </div>
+
+          <div id="cart-items" class="cart-items"><p class="empty-state">Il carrello è vuoto</p></div>
+
+          <div class="field">
+            <label for="pos-discount">Sconto (%)</label>
+            <input id="pos-discount" type="number" min="0" max="100" value="0" />
+          </div>
+
+          <div class="totals-row"><span>Subtotale</span><span id="pos-subtotal">€0.00</span></div>
+          <div class="totals-row"><span>di cui IVA</span><span id="pos-tax">€0.00</span></div>
+          <div class="totals-row"><span>Sconto</span><span id="pos-discount-amount">−€0.00</span></div>
+          <div class="totals-row total"><span>Totale</span><span id="pos-total">€0.00</span></div>
+
+          <div class="payment-choice">
+            <button data-payment="Contanti" class="selected">💶 Contanti</button>
+            <button data-payment="Carta">💳 Carta</button>
+          </div>
+
+          <button id="pos-confirm" class="primary" style="width:100%;">Conferma vendita</button>
+          <button id="pos-clear" class="ghost" style="width:100%; margin-top:6px;">Svuota carrello</button>
+        </aside>
+      </div>
+    </section>
+
+    <!-- PRODOTTI -->
+    <section class="view" data-view="prodotti">
+      <h1 class="view-title">Prodotti</h1>
+      <div class="toolbar">
+        <input id="prodotti-search" type="text" placeholder="Cerca prodotto…" />
+        <button id="btn-nuovo-prodotto" class="primary">+ Nuovo prodotto</button>
+        <button id="btn-nuova-categoria">+ Nuova categoria</button>
+      </div>
+      <table>
+        <thead><tr><th>Nome</th><th>Categoria</th><th>Prezzo</th><th>Costo</th><th>Scorta</th><th>Scorta min.</th><th>Barcode</th><th></th></tr></thead>
+        <tbody id="prodotti-tbody"></tbody>
+      </table>
+    </section>
+
+    <!-- MAGAZZINO -->
+    <section class="view" data-view="magazzino">
+      <h1 class="view-title">Magazzino</h1>
+      <div class="toolbar">
+        <label style="display:flex; align-items:center; gap:6px; font-size:14px;">
+          <input id="solo-sotto-scorta" type="checkbox" style="width:auto;" /> Solo sotto scorta
+        </label>
+      </div>
+      <table>
+        <thead><tr><th>Prodotto</th><th>Categoria</th><th>Scorta</th><th>Scorta min.</th><th>Stato</th><th>Movimento rapido</th></tr></thead>
+        <tbody id="magazzino-tbody"></tbody>
+      </table>
+
+      <h2 style="font-size:16px; margin-top:28px;">Ultimi movimenti</h2>
+      <table>
+        <thead><tr><th>Data</th><th>Prodotto</th><th>Quantità</th><th>Motivo</th></tr></thead>
+        <tbody id="movimenti-tbody"></tbody>
+      </table>
+    </section>
+
+    <!-- CLIENTI -->
+    <section class="view" data-view="clienti">
+      <h1 class="view-title">Clienti</h1>
+      <div class="toolbar">
+        <input id="clienti-search" type="text" placeholder="Cerca cliente…" />
+        <button id="btn-nuovo-cliente" class="primary">+ Nuovo cliente</button>
+      </div>
+      <table>
+        <thead><tr><th>Nome</th><th>Telefono</th><th>Email</th><th>Totale acquisti</th><th></th></tr></thead>
+        <tbody id="clienti-tbody"></tbody>
+      </table>
+    </section>
+
+    <!-- VENDITE -->
+    <section class="view" data-view="vendite">
+      <h1 class="view-title">Storico vendite</h1>
+      <div class="toolbar">
+        <button class="chip active" data-range="oggi">Oggi</button>
+        <button class="chip" data-range="7">Ultimi 7 giorni</button>
+        <button class="chip" data-range="30">Ultimi 30 giorni</button>
+        <button class="chip" data-range="tutto">Tutto</button>
+      </div>
+      <table>
+        <thead><tr><th>Data</th><th>Cliente</th><th>Articoli</th><th>Pagamento</th><th>Totale</th><th></th></tr></thead>
+        <tbody id="vendite-tbody"></tbody>
+      </table>
+    </section>
+
+    <!-- STATISTICHE -->
+    <section class="view" data-view="statistiche">
+      <h1 class="view-title">Statistiche</h1>
+      <div class="stat-grid" id="stat-tiles"></div>
+
+      <h2 style="font-size:16px;">Prodotti più venduti (30 giorni)</h2>
+      <div id="top-prodotti"></div>
+
+      <h2 style="font-size:16px; margin-top:24px;">Vendite per metodo di pagamento (30 giorni)</h2>
+      <div id="payment-split"></div>
+    </section>
+
+    <!-- IMPOSTAZIONI -->
+    <section class="view" data-view="impostazioni">
+      <h1 class="view-title">Impostazioni</h1>
+      <div class="field">
+        <label for="set-nome">Nome attività</label>
+        <input id="set-nome" type="text" />
+      </div>
+      <div class="field">
+        <label for="set-valuta">Simbolo valuta</label>
+        <input id="set-valuta" type="text" style="width:80px;" />
+      </div>
+      <div class="field">
+        <label for="set-iva">Aliquota IVA (%) — usata solo per il calcolo informativo in cassa</label>
+        <input id="set-iva" type="number" min="0" max="100" style="width:100px;" />
+      </div>
+      <button id="btn-salva-impostazioni" class="primary">Salva impostazioni</button>
+
+      <h2 style="font-size:16px; margin-top:28px;">Dati</h2>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button id="btn-export">Esporta backup (JSON)</button>
+        <button id="btn-import">Importa backup</button>
+        <input id="file-import" type="file" accept="application/json" style="display:none;" />
+        <button id="btn-reset" class="danger">Cancella tutti i dati</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Modal generico -->
+<div id="modal-root"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
