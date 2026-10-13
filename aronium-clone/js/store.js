@@ -1,7 +1,7 @@
 // Livello dati dell'app: nessuna dipendenza dal DOM, quindi testabile con node --test.
 // I prezzi sono IVA inclusa (come nel default di Aronium).
 
-const KEY = 'aronium-clone-v1';
+const KEY = 'aronium-clone-v2';
 
 export const round2 = (n) => (Math.round((Number(n) + Number.EPSILON) * 100) / 100) || 0; // || 0 elimina il -0
 
@@ -19,9 +19,14 @@ export function seedState() {
       { id: 't0', name: 'Esente', rate: 0 },
     ],
     paymentTypes: [
-      { id: 'cash', name: 'Contanti', allowsChange: true },
-      { id: 'card', name: 'Carta', allowsChange: false },
-      { id: 'other', name: 'Altro', allowsChange: false },
+      { id: 'cash', name: 'Cash', allowsChange: true },
+      { id: 'card', name: 'Card', allowsChange: false },
+      { id: 'check', name: 'Check', allowsChange: false },
+    ],
+    // Login a sola password come in Aronium. Credenziali iniziali: admin / 1234 (cambiarle da Impostazioni).
+    users: [
+      { id: 'u1', name: 'Admin', password: 'admin', role: 'admin' },
+      { id: 'u2', name: 'Cassiere', password: '1234', role: 'cashier' },
     ],
     groups: [], products: [], customers: [], documents: [], held: [],
   };
@@ -51,7 +56,7 @@ export function createStore(storage = null) {
     try { const raw = storage && storage.getItem(KEY); if (raw) return JSON.parse(raw); } catch { /* ignora */ }
     return null;
   };
-  state = load() || demoState();
+  state = { ...seedState(), ...(load() || demoState()) };
   const listeners = new Set();
   const save = () => {
     try { storage && storage.setItem(KEY, JSON.stringify(state)); } catch { /* quota/privato */ }
@@ -163,7 +168,7 @@ function snapshotItems(s, items) {
   });
 }
 
-export function createSale(s, { items, customerId = '', discount = 0, payments, note = '', allowNegative = true }) {
+export function createSale(s, { items, customerId = '', discount = 0, payments, note = '', allowNegative = true, userId = '', service = '' }) {
   if (!items || !items.length) throw new Error('Carrello vuoto');
   const snap = snapshotItems(s, items);
   if (snap.some((i) => !(i.qty > 0))) throw new Error('Quantità non valida');
@@ -183,7 +188,7 @@ export function createSale(s, { items, customerId = '', discount = 0, payments, 
   if (change > cashPaid) throw new Error('Resto non consentito per questo metodo di pagamento');
   const doc = {
     id: 'd' + Date.now() + Math.random().toString(36).slice(2, 6), type: 'sale', number: nextNumber(s, 'sale'),
-    date: new Date().toISOString(), customerId, items: snap, discount, totals, note,
+    date: new Date().toISOString(), customerId, userId, service, items: snap, discount, totals, note,
     payments: payments.map((p) => ({ typeId: p.typeId, amount: round2(p.amount) })), change,
   };
   applyStock(s, snap, -1);

@@ -1,5 +1,5 @@
 import * as S from './store.js';
-import { h, toast, modal, confirmBox, download } from './ui.js';
+import { h, toast, modal, confirmBox, download, icon } from './ui.js';
 
 let storage = null;
 try { storage = window.localStorage; storage.getItem('x'); } catch { storage = null; }
@@ -18,160 +18,259 @@ const byId = (arr, id) => arr.find((x) => x.id === id);
 const num = (v) => Number(String(v).replace(',', '.'));
 const guard = (fn) => { try { fn(); } catch (e) { toast(e.message); } };
 
-// ---------------- routing ----------------
-const routes = {
-  cassa: ['Cassa', posView], prodotti: ['Prodotti', productsView], magazzino: ['Magazzino', stockView],
-  documenti: ['Documenti', documentsView], clienti: ['Clienti', customersView],
-  report: ['Report', reportsView], impostazioni: ['Impostazioni', settingsView],
+// ---------------- sessione e routing ----------------
+let session = null; // { user }
+const backoffice = {
+  prodotti: ['Prodotti', productsView], magazzino: ['Magazzino', stockView], documenti: ['Documenti', documentsView],
+  clienti: ['Clienti', customersView], report: ['Report', reportsView], impostazioni: ['Impostazioni', settingsView],
 };
 let current = 'cassa';
-function go(name) { current = routes[name] ? name : 'cassa'; location.hash = current; render(); }
+const isAdmin = () => session && session.user.role === 'admin';
+function go(name) { current = name === 'cassa' || (backoffice[name] && isAdmin()) ? name : 'cassa'; location.hash = current; render(); }
+function logout() { session = null; clearCart(); current = 'cassa'; render(); }
+
 function render() {
-  const nav = document.getElementById('nav'); nav.replaceChildren(h('div', { class: 'brand' }, 'Aronium Clone'));
-  for (const [k, [label]] of Object.entries(routes)) nav.append(h('a', { class: k === current ? 'on' : '', onclick: () => go(k) }, label));
-  const view = document.getElementById('view'); view.replaceChildren(routes[current][1]());
+  const app = document.getElementById('app');
+  if (!session) { app.replaceChildren(loginView()); return; }
+  if (current === 'cassa') { app.replaceChildren(posView()); return; }
+  const nav = h('nav', null, h('div', { class: 'brand' }, 'aronium clone'),
+    h('a', { onclick: () => go('cassa') }, '← Cassa'),
+    Object.entries(backoffice).map(([k, [label]]) => h('a', { class: k === current ? 'on' : '', onclick: () => go(k) }, label)),
+    h('div', { class: 'sp' }), h('a', { onclick: logout }, `Esci (${session.user.name})`));
+  app.replaceChildren(h('div', { class: 'bo' }, nav, h('main', { id: 'view' }, backoffice[current][1]())));
 }
-window.addEventListener('hashchange', () => { const n = location.hash.slice(1); if (routes[n] && n !== current) { current = n; render(); } });
+window.addEventListener('hashchange', () => { const n = location.hash.slice(1); if (session && n !== current && (n === 'cassa' || (backoffice[n] && isAdmin()))) { current = n; render(); } });
+
+// ---------------- login con tastiera su schermo ----------------
+const KB = {
+  sym: [['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'BACK'], ['!', '@', '#', '/', '^', '&', '*', '(', ')', '"', 'ENTER'], ['SHIFT', '-', '_', '[', ']', '|', '<', '>', '+', '=', '~', 'SHIFT']],
+  abc: [['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', 'BACK'], ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'ENTER'], ['SHIFT', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', 'SHIFT']],
+};
+function loginView() {
+  let mode = 'sym', shift = false;
+  const err = h('div', { class: 'err', role: 'alert' });
+  const input = h('input', { type: 'password', 'aria-label': 'Password', autocomplete: 'off' });
+  const submit = () => {
+    const u = st().users.find((x) => x.password === input.value);
+    if (!u) { err.textContent = 'Password errata'; input.value = ''; return; }
+    session = { user: u }; current = 'cassa'; render();
+  };
+  input.addEventListener('keydown', (e) => { err.textContent = ''; if (e.key === 'Enter') submit(); });
+  const kbBox = h('div', { class: 'osk' });
+  const type = (t) => { const a = input.selectionStart ?? input.value.length, b = input.selectionEnd ?? a; input.setRangeText(t, a, b, 'end'); err.textContent = ''; input.focus(); };
+  const key = (label, cls, fn) => h('button', { class: cls, tabindex: '-1', onmousedown: (e) => e.preventDefault(), onclick: fn }, label);
+  const drawKb = () => {
+    kbBox.replaceChildren(...KB[mode].map((row) => h('div', { class: 'row' }, row.map((k) => {
+      if (k === 'BACK') return key(icon('backspace', 28), 'w', () => { const a = input.selectionStart, b = input.selectionEnd; if (a === b && a > 0) input.setRangeText('', a - 1, a, 'end'); else input.setRangeText('', a, b, 'end'); input.focus(); });
+      if (k === 'ENTER') return key('enter', 'w', submit);
+      if (k === 'SHIFT') return key(icon('arrow', 26), 'dim' + (shift ? ' on' : ''), () => { shift = !shift; drawKb(); });
+      return key(shift ? k.toUpperCase() : k, '', () => { type(shift ? k.toUpperCase() : k); if (shift) { shift = false; drawKb(); } });
+    }))),
+    h('div', { class: 'row' },
+      key('▾', 'dim', () => { kbBox.style.display = 'none'; input.focus(); }),
+      key(mode === 'sym' ? 'ABC' : '123', '', () => { mode = mode === 'sym' ? 'abc' : 'sym'; drawKb(); }),
+      key('.', '', () => type('.')), key('', 'sp', () => type(' ')),
+      key('prev', 'dim', () => { input.setSelectionRange(0, 0); input.focus(); }), key('next', 'dim', () => { const n = input.value.length; input.setSelectionRange(n, n); input.focus(); }),
+      key('‹', '', () => { const a = Math.max(0, input.selectionStart - 1); input.setSelectionRange(a, a); input.focus(); }),
+      key('›', '', () => { const a = Math.min(input.value.length, input.selectionEnd + 1); input.setSelectionRange(a, a); input.focus(); })));
+  };
+  drawKb();
+  input.addEventListener('focus', () => { kbBox.style.display = ''; });
+  setTimeout(() => input.focus(), 0);
+  return h('div', { class: 'login' },
+    h('button', { class: 'power', 'aria-label': 'Chiudi', onclick: () => toast('Chiudi la scheda del browser per uscire') }, icon('power', 32, 2)),
+    h('div', { class: 'brand' }, h('span', { style: 'color:var(--cyan)' }, icon('hexagon', 96, 1.8)), h('div', { class: 'word' }, 'aronium', h('small', null, 'CLONE'))),
+    h('h2', null, 'Login'),
+    h('div', { class: 'pw' }, input, h('button', { 'aria-label': 'Accedi', onclick: submit }, icon('arrow', 22, 2))),
+    h('a', { onclick: () => toast('Le password si cambiano da Impostazioni > Utenti (admin)') }, 'Password dimenticata?'), err, kbBox);
+}
 
 // ---------------- cassa ----------------
-const cart = { lines: [], discount: 0, customerId: '' };
-let posGroup = '', posSearch = '';
+const cart = { lines: [], discount: 0, customerId: '', service: '', selected: -1 };
+let searchMode = 'all';
+const SERVICES = ['', 'Dine-in', 'Take-away'];
+const plain = (n) => new Intl.NumberFormat('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0);
 
-function cartItems() { return cart.lines.map((l) => ({ ...l, price: l.price ?? byId(st().products, l.productId).price, taxRate: S.taxRate(st(), byId(st().products, l.productId).taxId) })); }
-
+function cartItems() { return cart.lines.map((l) => { const p = byId(st().products, l.productId); return { ...l, price: l.price ?? p.price, taxRate: S.taxRate(st(), p.taxId) }; }); }
+function clearCart() { Object.assign(cart, { lines: [], discount: 0, customerId: '', service: '', selected: -1 }); }
 function addToCart(p, q = 1) {
-  const l = cart.lines.find((x) => x.productId === p.id);
-  if (l) l.qty = Math.round((l.qty + q) * 1000) / 1000; else cart.lines.push({ productId: p.id, qty: q, discount: 0 });
-  render(); refocusScan();
+  const l = cart.lines.find((x) => x.productId === p.id && x.price === undefined && !x.discount);
+  if (l) { l.qty = Math.round((l.qty + q) * 1000) / 1000; cart.selected = cart.lines.indexOf(l); }
+  else { cart.lines.push({ productId: p.id, qty: q, discount: 0 }); cart.selected = cart.lines.length - 1; }
+  render();
 }
-function refocusScan() { const i = document.getElementById('scan'); if (i) i.focus(); }
+function focusSearch() { const i = document.getElementById('scan'); if (i) i.focus(); }
+const selLine = () => cart.lines[cart.selected];
+const matches = (p, q) => {
+  q = q.toLowerCase();
+  const f = { barcode: p.barcode, code: p.code, name: p.name, all: `${p.name} ${p.barcode} ${p.code}` }[searchMode];
+  return p.active && String(f).toLowerCase().includes(q);
+};
 
 function posView() {
-  const s = st();
-  const prods = s.products.filter((p) => p.active && (!posGroup || p.groupId === posGroup)
-    && (!posSearch || (p.name + ' ' + p.barcode + ' ' + p.code).toLowerCase().includes(posSearch.toLowerCase())));
-  const items = cartItems();
-  const t = S.calcTotals(items, cart.discount);
-
-  const scan = h('input', {
-    id: 'scan', class: 'grow', placeholder: 'Cerca o scansiona codice a barre + Invio', value: posSearch, autocomplete: 'off',
-    oninput: (e) => { posSearch = e.target.value; const pos = e.target.selectionStart; render(); const i = document.getElementById('scan'); i.focus(); i.setSelectionRange(pos, pos); },
-    onkeydown: (e) => {
-      if (e.key !== 'Enter') return;
-      const v = e.target.value.trim(); if (!v) return;
-      const exact = s.products.find((p) => p.active && (p.barcode === v || p.code === v));
-      const only = prods.length === 1 ? prods[0] : null;
-      const hit = exact || only;
-      if (hit) { posSearch = ''; addToCart(hit); } else toast('Prodotto non trovato');
-    },
+  const s = st(), items = cartItems(), t = S.calcTotals(items, cart.discount), has = cart.lines.length > 0, sel = selLine();
+  const results = h('div', { class: 'results', style: 'display:none', role: 'listbox' });
+  const scan = h('input', { id: 'scan', placeholder: 'Search products by name, code or barcode', autocomplete: 'off', 'aria-label': 'Cerca prodotti' });
+  const showResults = () => {
+    const q = scan.value.trim();
+    const list = q ? s.products.filter((p) => matches(p, q)).slice(0, 30) : [];
+    results.style.display = list.length ? '' : 'none';
+    results.replaceChildren(...list.map((p) => h('button', { onclick: () => addToCart(p) }, h('span', null, p.name, h('small', { class: 'muted' }, `  ${p.barcode || p.code}`)), h('span', null, money(p.price)))));
+  };
+  scan.addEventListener('input', showResults);
+  scan.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { scan.value = ''; showResults(); return; }
+    if (e.key !== 'Enter') return;
+    const v = scan.value.trim(); if (!v) return;
+    const exact = s.products.find((p) => p.active && (p.barcode === v || p.code === v));
+    const list = s.products.filter((p) => matches(p, v));
+    const hit = exact || (list.length === 1 ? list[0] : null);
+    if (hit) addToCart(hit); else toast(list.length ? 'Più risultati: scegli dall\'elenco' : 'Prodotto non trovato');
   });
+  const mode = (m, ic, label) => h('button', { class: 'mode' + (searchMode === m ? ' on' : ''), title: label, 'aria-label': label, 'aria-pressed': String(searchMode === m), onclick: () => { searchMode = m; render(); } }, icon(ic, 24));
+  const top = h('div', { class: 'topbar' }, mode('all', 'asterisk', 'Cerca ovunque'), mode('barcode', 'barcode', 'Cerca per barcode'), mode('code', 'hash', 'Cerca per codice'), mode('name', 'tag', 'Cerca per nome'),
+    h('div', { class: 'search' }, icon('search', 22), scan), results);
 
-  const left = h('div', { class: 'left' },
-    h('div', { class: 'bar' }, scan),
-    h('div', { class: 'groups' },
-      h('button', { class: posGroup ? '' : 'on', onclick: () => { posGroup = ''; render(); } }, 'Tutti'),
-      s.groups.map((g) => h('button', { class: posGroup === g.id ? 'on' : '', onclick: () => { posGroup = g.id; render(); } }, g.name))),
-    prods.length ? h('div', { class: 'tiles' }, prods.map((p) =>
-      h('button', { class: 'tile', onclick: () => addToCart(p) },
-        h('b', null, p.name), h('span', { class: 'p' }, money(p.price)),
-        p.trackStock ? h('small', null, `Giac. ${qtyFmt(p.stock)}`) : null)))
-      : h('div', { class: 'empty' }, 'Nessun prodotto. Aggiungine dalla sezione Prodotti.'));
+  const body = has ? cart.lines.map((l, i) => {
+    const it = items[i], p = byId(s.products, l.productId);
+    return h('div', { class: 'ln' + (i === cart.selected ? ' sel' : ''), onclick: () => { cart.selected = i === cart.selected ? -1 : i; render(); } },
+      h('span', null, p.name, l.discount ? h('small', null, `Sconto ${l.discount}%`) : null), h('span', { class: 'n' }, qtyFmt(l.qty)), h('span', { class: 'n' }, plain(it.price)), h('span', { class: 'n' }, plain(S.calcLine(it).gross)));
+  }) : h('div', { class: 'none' }, h('b', null, 'Nessun articolo'), h('span', null, 'Aggiungi prodotti alla ricevuta utilizzando il codice a barre, il codice prodotto o la ricerca premendo il bottone F3'));
+  const orders = h('div', { class: 'orders' },
+    h('div', { class: 'head' }, h('span', null, 'Nome del prodotto'), h('span', { class: 'n' }, 'Quantità'), h('span', { class: 'n' }, 'Prezzo'), h('span', { class: 'n' }, 'Totale')),
+    h('div', { class: 'body' }, body),
+    h('div', { class: 'totals', 'aria-live': 'polite' }, h('div', { class: 'r' }, h('span', null, 'Totale parziale'), h('span', null, plain(t.subtotal))),
+      cart.discount ? h('div', { class: 'r' }, h('span', null, `Sconto ${cart.discount}%`), h('span', null, '−' + plain(t.discountAmount))) : null,
+      h('div', { class: 'r' }, h('span', null, 'IVA'), h('span', null, plain(t.tax))), h('div', { class: 'r t' }, h('span', null, 'TOTALE'), h('span', null, plain(t.total)))));
 
-  const lines = cart.lines.length ? cart.lines.map((l, i) => {
-    const it = items[i], p = byId(s.products, l.productId), c = S.calcLine(it);
-    return h('div', { class: 'line' },
-      h('div', null, h('b', null, p.name), h('div', { class: 'muted' }, `${money(it.price)}${l.discount ? ` −${l.discount}%` : ''}`)),
-      h('div', { class: 'n' }, money(c.gross)),
-      h('div', { class: 'q' },
-        h('button', { 'aria-label': 'Diminuisci', onclick: () => { l.qty = Math.max(0, Math.round((l.qty - 1) * 1000) / 1000); if (l.qty <= 0) cart.lines.splice(i, 1); render(); } }, '−'),
-        h('input', { value: l.qty, inputmode: 'decimal', 'aria-label': 'Quantità', onchange: (e) => { const v = num(e.target.value); if (v > 0) l.qty = v; else cart.lines.splice(i, 1); render(); } }),
-        h('button', { 'aria-label': 'Aumenta', onclick: () => { l.qty += 1; render(); } }, '+'),
-        h('button', { title: 'Sconto riga %', onclick: () => askNumber('Sconto riga (%)', l.discount, (v) => { l.discount = Math.min(100, Math.max(0, v)); render(); }) }, '%')),
-      h('div', { class: 'n' }, h('button', { class: 'danger', 'aria-label': 'Rimuovi', onclick: () => { cart.lines.splice(i, 1); render(); } }, '✕')));
-  }) : [h('div', { class: 'empty' }, 'Carrello vuoto')];
-
-  const right = h('div', { class: 'card cart' },
-    h('div', { class: 'bar' },
-      h('select', { class: 'grow', 'aria-label': 'Cliente', onchange: (e) => { cart.customerId = e.target.value; } },
-        h('option', { value: '' }, 'Cliente generico'),
-        s.customers.map((c) => h('option', { value: c.id, selected: c.id === cart.customerId }, c.name))),
-      h('button', { onclick: holdCart, disabled: !cart.lines.length }, 'Sospendi'),
-      h('button', { onclick: showHeld, disabled: !s.held.length }, `Sospesi (${s.held.length})`)),
-    h('div', { class: 'lines' }, lines),
-    h('div', { class: 'sums' },
-      h('span', null, 'Imponibile'), h('span', null, money(t.net)),
-      h('span', null, 'IVA'), h('span', null, money(t.tax)),
-      h('span', null, 'Sconto documento'), h('span', null, t.discountAmount ? '−' + money(t.discountAmount) : money(0))),
-    h('div', { class: 'total', 'aria-live': 'polite' }, money(t.total)),
-    h('div', { class: 'pay-btns' },
-      h('button', { onclick: () => askNumber('Sconto documento (%)', cart.discount, (v) => { cart.discount = Math.min(100, Math.max(0, v)); render(); }), disabled: !cart.lines.length }, 'Sconto %'),
-      h('button', { class: 'danger', onclick: () => { clearCart(); render(); }, disabled: !cart.lines.length }, 'Svuota'),
-      h('button', { class: 'ok', style: 'grid-column:1/-1', onclick: () => payDialog(t), disabled: !cart.lines.length || t.total < 0 }, 'Paga')));
-
-  return h('div', { class: 'pos' }, left, right);
+  // k(): pulsante del pannello. `big` mostra il tasto F in grande (F9/F10) invece dell'icona.
+  const k = (label, ic, fk, fn, opt = {}) => h('button', { class: 'k ' + (opt.cls || ''), disabled: opt.disabled, onclick: fn, title: fk || label },
+    fk && !opt.big ? h('span', { class: 'f' }, fk) : null, opt.big ? h('span', { class: 'fk' }, fk) : null, ic ? icon(ic, 36) : null, h('span', null, label));
+  const cust = byId(s.customers, cart.customerId);
+  const pm = s.paymentTypes.slice(0, 3).map((pt, i) => h('button', { class: 'k pm' + (pt.allowsChange ? ' cash' : ''), disabled: !has, onclick: () => payWith(pt.id) }, i === 0 ? h('span', { class: 'f' }, 'F12') : null, pt.name));
+  const keys = h('div', { class: 'keys' },
+    k('Cancella', 'x', '', removeSelected, { disabled: !sel }), k('Cerca', 'search', 'F3', searchDialog), k('Quantità', 'basket', 'F4', setQty, { disabled: !sel }), k('Nuova vendita', 'plus', 'F8', newSale),
+    pm, h('div', { class: 'spacer' }), h('div', { class: 'logo' }, icon('hexagon', 150, 1.1)),
+    k('Cassetto contanti', 'drawer', '', () => toast('Cassetto contanti aperto')),
+    k(cart.service || 'Service type', cart.service === 'Dine-in' ? 'dine' : cart.service ? 'transfer' : 'question', '', () => { cart.service = SERVICES[(SERVICES.indexOf(cart.service) + 1) % SERVICES.length]; render(); }), h('div', { class: 'gap' }),
+    k('Sconto', 'percent', 'F2', discount), k('Price', 'tag', '', setPrice, { disabled: !sel }), k(cust ? cust.name : 'Customer', 'customer', '', pickCustomer), k(session.user.name, 'person', '', () => toast(`Utente: ${session.user.name}`)),
+    k('Salva la vendita', null, 'F9', holdCart, { big: true, disabled: !has }), k('Rimborsa', 'refund', '', refundDialog), k('Pagamento', null, 'F10', () => payDialog(t), { big: true, cls: 'pay', disabled: !has }),
+    k('Blocco', 'lock', '', logout), k(`Sospesi${s.held.length ? ` (${s.held.length})` : ''}`, 'transfer', 'F7', showHeld), k('Annulla ordine', 'trash', '', cancelOrder, { cls: 'cancel', disabled: !has && !cart.customerId }), k('', 'dots', '', moreMenu));
+  setTimeout(focusSearch, 0);
+  return h('div', { class: 'pos' }, top, h('div', { class: 'posmain' }, orders, keys));
 }
 
-function clearCart() { cart.lines = []; cart.discount = 0; cart.customerId = ''; }
-function holdCart() { st().held.push({ id: 'h' + Date.now(), at: new Date().toISOString(), cart: JSON.parse(JSON.stringify(cart)) }); clearCart(); store.save(); render(); toast('Ordine sospeso'); }
+function removeSelected() { if (!selLine()) return; cart.lines.splice(cart.selected, 1); cart.selected = Math.min(cart.selected, cart.lines.length - 1); render(); }
+function setQty() { const l = selLine(); if (l) askNumber('Quantità', l.qty, (v) => { if (v > 0) l.qty = v; else removeSelected(); render(); }); }
+function setPrice() { const l = selLine(); if (l) askNumber('Prezzo unitario (IVA incl.)', l.price ?? byId(st().products, l.productId).price, (v) => { l.price = S.round2(v); render(); }); }
+function discount() {
+  const l = selLine();
+  if (l) askNumber('Sconto sulla riga (%)', l.discount, (v) => { l.discount = Math.min(100, v); render(); });
+  else if (cart.lines.length) askNumber('Sconto sul documento (%)', cart.discount, (v) => { cart.discount = Math.min(100, v); render(); });
+  else toast('Aggiungi un articolo prima');
+}
+function newSale() { if (cart.lines.length) holdCart(); else toast('La vendita corrente è già vuota'); }
+function cancelOrder() { confirmBox('Annullare l\'ordine corrente?', () => { clearCart(); render(); }, 'Annulla ordine'); }
+function pickCustomer() {
+  modal('Cliente', (close) => ({
+    body: h('div', null, h('button', { class: 'listbtn', onclick: () => { cart.customerId = ''; close(); render(); } }, 'Cliente generico'),
+      st().customers.map((c) => h('button', { class: 'listbtn', onclick: () => { cart.customerId = c.id; close(); render(); } }, h('span', null, c.name), h('span', { class: 'muted' }, c.phone)))),
+    buttons: [h('button', { onclick: close }, 'Chiudi')],
+  }));
+}
+function searchDialog() {
+  modal('Cerca prodotto', (close) => {
+    const inp = h('input', { placeholder: 'Nome, codice o barcode', style: 'width:100%;margin-bottom:8px' }), out = h('div');
+    const draw = () => {
+      const q = inp.value.trim().toLowerCase();
+      out.replaceChildren(...st().products.filter((p) => p.active && (!q || `${p.name} ${p.barcode} ${p.code}`.toLowerCase().includes(q))).slice(0, 40)
+        .map((p) => h('button', { class: 'listbtn', onclick: () => { close(); addToCart(p); } }, h('span', null, p.name), h('span', null, money(p.price)))));
+    };
+    inp.addEventListener('input', draw); draw();
+    return { body: h('div', null, inp, out), buttons: [h('button', { onclick: close }, 'Chiudi')] };
+  });
+}
+function refundDialog() {
+  const sales = st().documents.filter((d) => d.type === 'sale').slice(-20).reverse();
+  modal('Rimborsa', (close) => ({
+    body: sales.length ? h('div', null, sales.map((d) => h('button', { class: 'listbtn', onclick: () => { close(); docDialog(d); } }, h('span', null, `${d.number}  ${dt(d.date)}`), h('span', null, money(d.totals.total))))) : h('div', { class: 'empty' }, 'Nessuna vendita da rimborsare'),
+    buttons: [h('button', { onclick: close }, 'Chiudi')],
+  }));
+}
+function moreMenu() {
+  modal('Menu', (close) => {
+    const last = st().documents.filter((d) => d.type === 'sale').pop();
+    const go2 = (n) => () => { close(); go(n); };
+    return { body: h('div', { class: 'menu' },
+      isAdmin() ? Object.entries(backoffice).map(([key, [label]]) => h('button', { onclick: go2(key) }, label)) : null,
+      h('button', { disabled: !last, onclick: () => { close(); printReceipt(last); } }, 'Ristampa ultimo scontrino'), h('button', { onclick: () => { close(); logout(); } }, 'Esci')),
+      buttons: [h('button', { onclick: close }, 'Chiudi')] };
+  });
+}
+function holdCart() {
+  if (!cart.lines.length) return;
+  st().held.push({ id: 'h' + Date.now(), at: new Date().toISOString(), cart: JSON.parse(JSON.stringify(cart)) }); clearCart(); store.save(); render(); toast('Vendita salvata');
+}
 function showHeld() {
-  modal('Ordini sospesi', (close) => ({
-    body: h('div', null, st().held.map((o) => h('div', { class: 'bar' },
+  modal('Vendite sospese', (close) => ({
+    body: st().held.length ? h('div', null, st().held.map((o) => h('div', { class: 'bar' },
       h('span', { class: 'grow' }, `${dt(o.at)} — ${o.cart.lines.length} righe`),
-      h('button', { onclick: () => { Object.assign(cart, o.cart); st().held = st().held.filter((x) => x.id !== o.id); store.save(); close(); render(); } }, 'Riprendi'),
-      h('button', { class: 'danger', onclick: () => { st().held = st().held.filter((x) => x.id !== o.id); store.save(); close(); render(); } }, 'Elimina')))),
+      h('button', { disabled: cart.lines.length > 0, title: cart.lines.length ? 'Svuota o salva la vendita corrente' : '', onclick: () => { Object.assign(cart, o.cart, { selected: -1 }); st().held = st().held.filter((x) => x.id !== o.id); store.save(); close(); render(); } }, 'Riprendi'),
+      h('button', { class: 'danger', onclick: () => { st().held = st().held.filter((x) => x.id !== o.id); store.save(); close(); render(); } }, 'Elimina')))) : h('div', { class: 'empty' }, 'Nessuna vendita sospesa'),
     buttons: [h('button', { onclick: close }, 'Chiudi')],
   }));
 }
 
 function askNumber(title, initial, onOk) {
   modal(title, (close) => {
-    const inp = h('input', { value: initial || '', inputmode: 'decimal' });
+    const inp = h('input', { value: initial || '', inputmode: 'decimal', style: 'width:100%' });
     const ok = () => { const v = num(inp.value || 0); if (Number.isNaN(v) || v < 0) return toast('Valore non valido'); close(); onOk(v); };
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
     return { body: inp, buttons: [h('button', { onclick: close }, 'Annulla'), h('button', { class: 'primary', onclick: ok }, 'OK')] };
   });
 }
 
-function payDialog(totals) {
+function finalizeSale(payments) {
+  const doc = S.createSale(st(), { items: cartItems(), customerId: cart.customerId, discount: cart.discount, payments, userId: session.user.id, service: cart.service });
+  store.save(); clearCart(); render(); toast(`Vendita ${doc.number} registrata`); printReceipt(doc);
+}
+function payWith(typeId) {
+  const t = S.calcTotals(cartItems(), cart.discount), type = byId(st().paymentTypes, typeId);
+  if (type.allowsChange) return payDialog(t, typeId);
+  guard(() => finalizeSale([{ typeId, amount: t.total }]));
+}
+function payDialog(totals, preset) {
   const s = st();
   modal('Pagamento', (close) => {
-    const inputs = {};
-    const status = h('div', { class: 'total' });
-    const err = h('div', { class: 'err' });
+    const inputs = {}, status = h('div', { class: 'total' }), err = h('div', { class: 'err' });
     const upd = () => {
-      const paid = S.round2(Object.values(inputs).reduce((a, i) => a + (num(i.value || 0) || 0), 0));
-      const diff = S.round2(paid - totals.total);
-      status.textContent = diff >= 0 ? `Resto ${money(diff)}` : `Mancano ${money(-diff)}`;
-      status.style.color = diff >= 0 ? 'var(--ok)' : 'var(--bad)';
+      const diff = S.round2(Object.values(inputs).reduce((a, i) => a + (num(i.value || 0) || 0), 0) - totals.total);
+      status.textContent = diff >= 0 ? `Resto ${money(diff)}` : `Mancano ${money(-diff)}`; status.style.color = diff >= 0 ? '#7ed17f' : '#ff7b7b';
     };
-    const rows = s.paymentTypes.map((t, i) => {
-      const inp = h('input', { inputmode: 'decimal', value: i === 0 ? totals.total.toFixed(2) : '', oninput: upd });
-      inputs[t.id] = inp;
-      return [h('label', null, t.name), h('div', { class: 'bar' }, inp, h('button', { onclick: () => { inp.value = S.round2(Math.max(0, totals.total - otherPaid(inputs, t.id))).toFixed(2); upd(); } }, 'Importo esatto'))];
+    const first = preset || s.paymentTypes[0].id;
+    const rows = s.paymentTypes.map((pt) => {
+      const inp = h('input', { inputmode: 'decimal', value: pt.id === first ? totals.total.toFixed(2) : '', oninput: upd });
+      inputs[pt.id] = inp;
+      return [h('label', null, pt.name), h('div', { class: 'bar' }, inp, h('button', { onclick: () => { inp.value = S.round2(Math.max(0, totals.total - otherPaid(inputs, pt.id))).toFixed(2); upd(); } }, 'Esatto'))];
     });
     upd();
     const confirm = () => {
       const payments = Object.entries(inputs).map(([typeId, i]) => ({ typeId, amount: num(i.value || 0) || 0 })).filter((p) => p.amount > 0);
-      try {
-        const doc = S.createSale(s, { items: cartItems(), customerId: cart.customerId, discount: cart.discount, payments });
-        store.save(); clearCart(); close(); printReceipt(doc); toast(`Vendita ${doc.number} registrata`); render();
-      } catch (e) { err.textContent = e.message; }
+      try { finalizeSale(payments); close(); } catch (e) { err.textContent = e.message; }
     };
-    return {
-      body: h('div', null, h('div', { class: 'total' }, money(totals.total)), h('div', { class: 'form' }, rows), status, err),
-      buttons: [h('button', { onclick: close }, 'Annulla'), h('button', { class: 'ok', onclick: confirm }, 'Conferma e stampa')],
-    };
+    return { body: h('div', null, h('div', { class: 'total' }, money(totals.total)), h('div', { class: 'form' }, rows), status, err),
+      buttons: [h('button', { onclick: close }, 'Annulla'), h('button', { class: 'ok', onclick: confirm }, 'Conferma e stampa')] };
   });
 }
 const otherPaid = (inputs, skip) => Object.entries(inputs).filter(([k]) => k !== skip).reduce((a, [, i]) => a + (num(i.value || 0) || 0), 0);
 
 function printReceipt(doc) {
-  const s = st(), set = s.settings, cust = byId(s.customers, doc.customerId);
+  const s = st(), set = s.settings, cust = byId(s.customers, doc.customerId), user = byId(s.users, doc.userId);
   const r = document.getElementById('receipt');
   const row = (a, b) => h('div', { class: 'r' }, h('span', null, a), h('span', null, b));
   r.replaceChildren(h('div', null,
     h('h4', null, set.company), set.address ? h('div', { class: 'c' }, set.address) : null, set.taxId ? h('div', { class: 'c' }, 'P.IVA ' + set.taxId) : null,
-    h('hr'), row(typeLabel[doc.type] + ' ' + doc.number, dt(doc.date)), cust ? h('div', null, 'Cliente: ' + cust.name) : null, h('hr'),
+    h('hr'), row(typeLabel[doc.type] + ' ' + doc.number, dt(doc.date)), cust ? h('div', null, 'Cliente: ' + cust.name) : null, user ? h('div', null, 'Operatore: ' + user.name) : null, doc.service ? h('div', null, doc.service) : null, h('hr'),
     doc.items.map((i) => [h('div', null, i.name), row(`${qtyFmt(i.qty)} x ${money(i.price)}${i.discount ? ` -${i.discount}%` : ''}`, money(S.calcLine(i).gross))]),
     h('hr'), doc.discount ? row('Sconto', doc.discount + '%') : null, row('TOTALE', money(doc.totals.total)), row('di cui IVA', money(doc.totals.tax)),
     doc.payments.map((p) => row((byId(s.paymentTypes, p.typeId) || {}).name || p.typeId, money(p.amount))),
@@ -376,6 +475,13 @@ function settingsView() {
     listEditor('Gruppi prodotto', s.groups, 'name', [gIn, h('button', { onclick: () => guard(() => { S.addGroup(s, gIn.value); store.save(); render(); }) }, 'Aggiungi')]),
     listEditor('Aliquote IVA', s.taxes, 'name', [tName, tRate, h('button', { onclick: () => guard(() => { const r = num(tRate.value); if (!tName.value.trim() || !(r >= 0 && r <= 100)) throw new Error('Nome e aliquota (0–100) richiesti'); s.taxes.push({ id: 't' + Date.now(), name: tName.value.trim(), rate: r }); store.save(); render(); }) }, 'Aggiungi')], (x) => ` (${x.rate}%)`),
     listEditor('Metodi di pagamento', s.paymentTypes, 'name', [pIn, h('button', { onclick: () => guard(() => { if (!pIn.value.trim()) throw new Error('Nome richiesto'); s.paymentTypes.push({ id: 'pt' + Date.now(), name: pIn.value.trim(), allowsChange: false }); store.save(); render(); }) }, 'Aggiungi')]),
+    h('h2', null, 'Utenti'),
+    h('table', null, h('tbody', null, s.users.map((u) => h('tr', null,
+      h('td', null, h('input', { value: u.name, 'aria-label': 'Nome utente', onchange: (e) => { if (e.target.value.trim()) { u.name = e.target.value.trim(); store.save(); toast('Salvato'); } } })),
+      h('td', null, h('input', { value: u.password, 'aria-label': 'Password', onchange: (e) => { if (!e.target.value) { e.target.value = u.password; return toast('Password obbligatoria'); } if (s.users.some((x) => x !== u && x.password === e.target.value)) { e.target.value = u.password; return toast('Password già usata da un altro utente'); } u.password = e.target.value; store.save(); toast('Salvato'); } })),
+      h('td', null, h('select', { 'aria-label': 'Ruolo', onchange: (e) => { if (u.role === 'admin' && e.target.value !== 'admin' && s.users.filter((x) => x.role === 'admin').length < 2) { e.target.value = 'admin'; return toast('Serve almeno un amministratore'); } u.role = e.target.value; store.save(); } }, h('option', { value: 'admin', selected: u.role === 'admin' }, 'Amministratore'), h('option', { value: 'cashier', selected: u.role === 'cashier' }, 'Cassiere'))),
+      h('td', { class: 'n' }, h('button', { class: 'danger', onclick: () => { if (u.role === 'admin' && s.users.filter((x) => x.role === 'admin').length < 2) return toast('Serve almeno un amministratore'); if (u === session.user) return toast('Non puoi eliminare l\'utente attivo'); s.users.splice(s.users.indexOf(u), 1); store.save(); render(); } }, '✕')))))),
+    h('div', { class: 'bar', style: 'margin-top:8px' }, h('button', { onclick: () => { let n = 1, pw; do { pw = String(1000 + n++); } while (s.users.some((x) => x.password === pw)); s.users.push({ id: 'u' + Date.now(), name: 'Nuovo utente', password: pw, role: 'cashier' }); store.save(); render(); } }, '+ Utente'), h('span', { class: 'muted' }, 'Il login usa solo la password: deve essere unica. Serve a bloccare la cassa, non è una protezione dei dati.')),
     h('h2', null, 'Dati'),
     h('div', { class: 'bar' },
       h('button', { onclick: () => download(`backup-${dayKey(new Date())}.json`, store.exportJSON(), 'application/json') }, 'Esporta backup'),
@@ -386,6 +492,10 @@ function settingsView() {
 }
 
 // ---------------- avvio ----------------
-document.addEventListener('keydown', (e) => { if (e.key === 'F2' && current === 'cassa') { e.preventDefault(); refocusScan(); } });
-current = routes[location.hash.slice(1)] ? location.hash.slice(1) : 'cassa';
+document.addEventListener('keydown', (e) => {
+  if (!session || current !== 'cassa' || document.querySelector('#modal-root .back')) return;
+  const has = cart.lines.length > 0;
+  const map = { F2: discount, F3: searchDialog, F4: setQty, F7: showHeld, F8: newSale, F9: holdCart, F10: () => has && payDialog(S.calcTotals(cartItems(), cart.discount)), F12: () => has && payWith('cash') };
+  if (map[e.key]) { e.preventDefault(); map[e.key](); }
+});
 render();

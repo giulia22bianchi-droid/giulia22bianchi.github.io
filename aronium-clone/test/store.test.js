@@ -93,3 +93,12 @@ test('persistenza, export/import e CSV', () => {
   assert.throws(() => b.importJSON('{"x":1}'), /non valido/);
   assert.equal(S.toCSV([['a;b', 'c"d', 1]]), '"a;b";"c""d";1');
 });
+
+test('utenti iniziali e migrazione di dati vecchi senza users', () => {
+  const mem = new Map(); const storage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v) };
+  const old = S.demoState(); delete old.users; mem.set('aronium-clone-v2', JSON.stringify(old));
+  const st = S.createStore(storage).state;
+  assert.ok(st.users.some((u) => u.role === 'admin'));
+  const d = S.createSale(st, { items: [{ productId: st.products[0].id, qty: 1 }], payments: [{ typeId: 'cash', amount: 5 }], userId: 'u1', service: 'Dine-in' });
+  assert.equal(d.userId, 'u1');
+});
