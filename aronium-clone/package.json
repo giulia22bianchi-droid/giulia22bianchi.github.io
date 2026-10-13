@@ -1,0 +1,11 @@
+{
+  "name": "aronium-clone",
+  "version": "1.0.0",
+  "description": "Clone di Aronium POS: vendita, prodotti, magazzino, clienti, report",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node serve.js",
+    "test": "node --test test/store.test.js"
+  }
+}
